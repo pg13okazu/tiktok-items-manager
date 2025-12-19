@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TikTok バトルアイテム管理</title>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1976d2">
+
+<style>
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #f5f5f5;
+    padding: 12px;
+    margin: 0;
+  }
+  h2, h3 { margin: 12px 0 8px; }
+
+  select, input, button {
+    font-size: 16px;
+    padding: 10px;
+    margin: 6px 0;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  button {
+    background: #1976d2;
+    color: white;
+    border: none;
+    border-radius: 8px;
+  }
+
+  button.danger { background: #d32f2f; }
+
+  .card {
+    background: white;
+    padding: 14px;
+    margin: 10px 0;
+    border-radius: 12px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+  }
+
+  .red { color: #d32f2f; font-weight: bold; }
+
+  hr { margin: 16px 0; }
+
+  .row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+</style>
+</head>
+<body>
+
+<h2>📊 全体アイテム数</h2>
+<div id="totalSummary" class="card"></div>
+
+<h2>👤 視聴者管理</h2>
+<div class="row">
+  <select id="viewerSelect" onchange="render()"></select>
+  <input id="viewerName" placeholder="視聴者名">
+  <button onclick="addViewer()">＋ 視聴者追加</button>
+  <button class="danger" onclick="deleteViewer()">🗑 視聴者削除</button>
+</div>
+
+<hr>
+
+<h3>🎮 アイテム追加</h3>
+<div class="row">
+  <select id="itemType">
+    <option value="glove">グローブ</option>
+    <option value="hammer">ハンマー</option>
+    <option value="bonus">ボーナスタイム</option>
+    <option value="booster">ブースター</option>
+    <option value="mist">ミスト</option>
+  </select>
+  <button onclick="addItem()">＋ アイテム追加</button>
+</div>
+
+<hr>
+
+<div id="items"></div>
+
+<script>
+/* ===== 定数・保存 ===== */
+const STORAGE_KEY = "tiktok_viewers";
+const ITEM_LABELS = {
+  glove: "グローブ",
+  hammer: "ハンマー",
+  bonus: "ボーナスタイム",
+  booster: "ブースター",
+  mist: "ミスト",
+};
+
+function load() {
+  return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+}
+function save(data) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+function format(ms) {
+  const d = Math.floor(ms / 86400000);
+  const h = Math.floor(ms % 86400000 / 3600000);
+  const m = Math.floor(ms % 3600000 / 60000);
+  return `${d}日 ${h}時間 ${m}分`;
+}
+
+/* ===== 視聴者 ===== */
+function addViewer() {
+  const name = viewerName.value.trim();
+  if (!name) return;
+  const data = load();
+  const id = Date.now().toString();
+  data[id] = { name, items: [] };
+  save(data);
+  viewerName.value = "";
+  updateViewerList(id);
+}
+
+function deleteViewer() {
+  const data = load();
+  const vid = viewerSelect.value;
+  if (!vid || !data[vid]) return;
+  if (!confirm(`視聴者「${data[vid].name}」を削除します。\n全アイテムも削除されます。`)) return;
+  delete data[vid];
+  save(data);
+  updateViewerList();
+}
+
+function updateViewerList(selectId) {
+  const data = load();
+  viewerSelect.innerHTML = "";
+  for (const id in data) {
+    const opt = document.createElement("option");
+    opt.value = id;
+    opt.textContent = data[id].name;
+    viewerSelect.appendChild(opt);
+  }
+  if (selectId) viewerSelect.value = selectId;
+  render();
+}
+
+/* ===== アイテム ===== */
+function addItem() {
+  const vid = viewerSelect.value;
+  if (!vid) return;
+  const data = load();
+  const now = Date.now();
+  data[vid].items.push({
+    type: itemType.value,
+    acquiredAt: now,
+    expiresAt: now + 120 * 60 * 60 * 1000,
+  });
+  save(data);
+  render();
+}
+
+function consumeOldest(type) {
+  const data = load();
+  const vid = viewerSelect.value;
+  if (!vid || !data[vid]) return;
+
+  const targets = data[vid].items
+    .map((item, index) => ({ item, index }))
+    .filter(e => e.item.type === type);
+
+  if (!targets.length) return;
+
+  targets.sort((a, b) => a.item.expiresAt - b.item.expiresAt);
+
+  if (!confirm(`${data[vid].name} の「${ITEM_LABELS[type]}」を1つ消費しますか？`)) return;
+
+  data[vid].items.splice(targets[0].index, 1);
+  save(data);
+  render();
+}
+
+/* ===== 全体集計 ===== */
+function renderTotalSummary() {
+  const data = load();
+  const now = Date.now();
+  const total = { glove:0, hammer:0, bonus:0, booster:0, mist:0 };
+
+  for (const vid in data) {
+    for (const item of data[vid].items) {
+      if (item.expiresAt > now) total[item.type]++;
+    }
+  }
+
+  totalSummary.innerHTML = `
+    ${Object.keys(ITEM_LABELS).map(
+      t => `${ITEM_LABELS[t]}：${total[t]}`
+    ).join("<br>")}
+  `;
+}
+
+/* ===== 描画 ===== */
+function render() {
+  const data = load();
+  const vid = viewerSelect.value;
+  if (!vid || !data[vid]) {
+    renderTotalSummary();
+    return;
+  }
+
+  const now = Date.now();
+  data[vid].items = data[vid].items.filter(i => i.expiresAt > now);
+  save(data);
+
+  const grouped = {};
+  for (const i of data[vid].items) {
+    grouped[i.type] ??= [];
+    grouped[i.type].push(i);
+  }
+
+  items.innerHTML = "";
+  for (const type in ITEM_LABELS) {
+    const arr = grouped[type] || [];
+    if (!arr.length) continue;
+
+    arr.sort((a,b) => a.expiresAt - b.expiresAt);
+    const remain = arr[0].expiresAt - now;
+
+    items.innerHTML += `
+      <div class="card">
+        <b>${ITEM_LABELS[type]}</b>：${arr.length}<br>
+        <span class="${remain < 3600000 ? "red" : ""}">
+          最短消滅まで 残り ${format(remain)}
+        </span><br><br>
+        <button onclick="consumeOldest('${type}')">このアイテムを1つ消費</button>
+      </div>
+    `;
+  }
+
+  renderTotalSummary();
+}
+
+/* ===== 初期化 ===== */
+setInterval(render, 60000);
+updateViewerList();
+
+/* ===== PWA ===== */
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js");
+}
+</script>
+
+</body>
+</html>
+
